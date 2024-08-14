@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 void main() => runApp(MyApp());
 
@@ -23,14 +25,15 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isObscure = true;
-  String _errorMessage = '';
+  String _message = '';
+  bool _isLoading = false;
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -65,9 +68,15 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     SizedBox(height: 50),
                     _buildTextField(
-                      controller: _emailController,
-                      hint: 'Email',
-                      icon: Icons.email,
+                      controller: _usernameController,
+                      hint: 'Username',
+                      icon: Icons.person,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your username';
+                        }
+                        return null;
+                      },
                     ),
                     SizedBox(height: 20),
                     _buildTextField(
@@ -75,29 +84,41 @@ class _LoginPageState extends State<LoginPage> {
                       hint: 'Password',
                       icon: Icons.lock,
                       isPassword: true,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your password';
+                        }
+                        return null;
+                      },
                     ),
                     SizedBox(height: 20),
-                    if (_errorMessage.isNotEmpty)
+                    if (_message.isNotEmpty)
                       Text(
-                        _errorMessage,
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    SizedBox(height: 30),
-                    ElevatedButton(
-                      child: Text('Login'),
-                      onPressed: _submit,
-                      style: ElevatedButton.styleFrom(
-                        // primary: Colors.white,
-                        // onPrimary: Colors.blue[700],
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 50, vertical: 15),
-                        textStyle: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
+                        _message,
+                        style: TextStyle(
+                          color: _message.startsWith('Error')
+                              ? Colors.red
+                              : Colors.green,
                         ),
                       ),
-                    ),
+                    SizedBox(height: 30),
+                    _isLoading
+                        ? CircularProgressIndicator(color: Colors.white)
+                        : ElevatedButton(
+                            child: Text('Login'),
+                            onPressed: _login,
+                            style: ElevatedButton.styleFrom(
+                              // primary: Colors.white,
+                              // onPrimary: Colors.blue[700],
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 50, vertical: 15),
+                              textStyle: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                            ),
+                          ),
                     SizedBox(height: 20),
                     Text(
                       'Or login with:',
@@ -111,16 +132,6 @@ class _LoginPageState extends State<LoginPage> {
                         _buildSocialLoginButton('Facebook', Colors.blue),
                         _buildSocialLoginButton('GitHub', Colors.black),
                       ],
-                    ),
-                    SizedBox(height: 20),
-                    TextButton(
-                      child: Text(
-                        'Forgot Password?',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      onPressed: () {
-                        // Add forgot password functionality here
-                      },
                     ),
                   ],
                 ),
@@ -137,6 +148,7 @@ class _LoginPageState extends State<LoginPage> {
     required String hint,
     required IconData icon,
     bool isPassword = false,
+    String? Function(String?)? validator,
   }) {
     return TextFormField(
       controller: controller,
@@ -162,21 +174,20 @@ class _LoginPageState extends State<LoginPage> {
           borderRadius: BorderRadius.circular(30),
           borderSide: BorderSide.none,
         ),
+        errorStyle: TextStyle(color: Colors.white),
       ),
       style: TextStyle(color: Colors.white),
       obscureText: isPassword ? _isObscure : false,
+      validator: validator,
     );
   }
 
   Widget _buildSocialLoginButton(String text, Color color) {
     return ElevatedButton(
       child: Text(text),
-      onPressed: () {
-        // ทำการ login ด้วย social media ที่นี่
-        print('Login with $text');
-      },
+      onPressed: () => _socialLogin(text),
       style: ElevatedButton.styleFrom(
-        // primary: color
+        backgroundColor: color,
         padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         textStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
         shape: RoundedRectangleBorder(
@@ -186,27 +197,51 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  void _submit() {
-    setState(() {
-      _errorMessage = '';
-    });
+  Future<void> _login() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true;
+        _message = '';
+      });
 
-    if (_emailController.text.isEmpty && _passwordController.text.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter both email and password';
-      });
-    } else if (_emailController.text.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter your email';
-      });
-    } else if (_passwordController.text.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter your password';
-      });
-    } else {
-      // ทำการ login ที่นี่
-      print(
-          'Email: ${_emailController.text}, Password: ${_passwordController.text}');
+      final username = _usernameController.text;
+      final password = _passwordController.text;
+
+      try {
+        final response = await http.post(
+          Uri.parse('https://wallet-api-7m1z.onrender.com/auth/login'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'username': username,
+            'password': password,
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          final responseData = json.decode(response.body);
+          setState(() {
+            _message = 'Login successful! Token: ${responseData['token']}';
+          });
+        } else {
+          setState(() {
+            _message = 'Error: Login failed. Please check your credentials.';
+          });
+        }
+      } catch (e) {
+        setState(() {
+          _message = 'Error: Network error. Please try again.';
+        });
+      } finally {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
+  }
+
+  void _socialLogin(String provider) {
+    // ここにソーシャルログインの実装を追加します
+    print('Login with $provider');
+    // 実際には、各プロバイダーのSDKを使用してログイン処理を行います
   }
 }
